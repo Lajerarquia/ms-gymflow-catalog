@@ -1,6 +1,6 @@
 # ms-gymflow-catalog
 
-Catálogo de GymFlow: clases (en la API, `services`), salas (`rooms`) y cupos. Persiste en Oracle Autonomous DB.
+Catálogo de GymFlow: clases (en la API, `services`), salas (`rooms`) y cupos. Persiste en Amazon RDS PostgreSQL.
 No está expuesto a internet: lo llaman el BFF (rutas públicas `/api/catalog/...`) y ms-gymflow-reservations
 (rutas internas de cupo).
 
@@ -49,10 +49,10 @@ Mismo JSON que el BFF: `{"timestamp", "status", "error", "message", "path"}`, co
 ## Ejecutar
 
 ```bash
-# Local con H2 y datos de ejemplo (sin Oracle)
+# Local con H2 (modo PostgreSQL) y datos de ejemplo (sin RDS)
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 
-# Con Oracle: descomprimir el wallet en ./wallet (ignorado por git) y completar .env
+# Con Amazon RDS PostgreSQL: completar DB_URL, DB_USERNAME y DB_PASSWORD en .env (ignorado por git)
 cp .env.example .env
 ```
 
@@ -63,4 +63,4 @@ Si el puerto 8082 está ocupado en tu PC, agrega `--server.port=<otro>` (en Dock
 ```bash
 ./mvnw test
 ```
-Usan H2 en memoria; no necesitan Oracle.
+Usan H2 en memoria en modo PostgreSQL; no necesitan RDS.

@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Datos de ejemplo solo para el perfil {@code local} (H2). Las fechas se calculan desde "ahora"
- * para que siempre haya clases futuras. En Oracle no se carga nada automáticamente.
+ * para que siempre haya clases futuras. En RDS no se carga nada automáticamente.
  */
 @Component
 @Profile("local")

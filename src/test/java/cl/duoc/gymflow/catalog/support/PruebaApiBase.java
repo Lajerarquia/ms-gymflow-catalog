@@ -25,7 +25,7 @@ import org.springframework.test.web.servlet.ResultActions;
  * sin application.yml de pruebas, para no reemplazar el de main) y la BD vacía antes de cada prueba.
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:catalogo-pruebas;DB_CLOSE_DELAY=-1",
+        "spring.datasource.url=jdbc:h2:mem:catalogo-pruebas;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "spring.datasource.driver-class-name=org.h2.Driver",
