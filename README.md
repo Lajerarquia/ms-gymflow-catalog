@@ -46,6 +46,29 @@ Errores: 404 clase inexistente, 409 sin cupos, 400 falta `reservationId`.
 
 Mismo JSON que el BFF: `{"timestamp", "status", "error", "message", "path"}`, con `message` en español.
 
+## Auditoría por Kafka (EP5)
+
+Cada vez que un usuario **crea, edita o elimina** una clase o una sala, catalog publica un `EventoAuditoriaDto` en
+`audit.timeline` (clave = `eventId`). Lo consume ms-gymflow-audit. Es el segundo productor de ese tópico (el otro es
+ms-gymflow-reservations, con las reservas). Código en el paquete `eventos`.
+
+- **Quién, desde dónde y traza:** `config/FiltroContexto` deja en el MDC `X-User-Id`, `X-User-Name` (URL-encoded),
+  `X-Client-Ip` y `X-Trace-Id` (que se devuelve en la respuesta). Los envía el BFF. Sin identidad, el evento sale con
+  actor `desconocido`.
+- **Después del commit:** `ClaseService` y `SalaService` publican el evento interno `CatalogoModificado` dentro de su
+  transacción; `PublicadorAuditoria` lo recibe con `@TransactionalEventListener(AFTER_COMMIT)`. Si la operación se
+  rechaza (409, 400) hay rollback y no se audita nada.
+- **Detalle legible:** al editar se listan solo los campos que cambiaron (`Cambios`), p. ej.
+  `Clase 'Spinning 45' editada: cupo 10 → 15; plan BASICO → PLUS`.
+- Las rutas internas de cupo (`/internal/...`) no se auditan aquí: esa acción (confirmar o cancelar) la audita reservations.
+- **Productor confiable** (`application.yml`): `acks=all`, `enable.idempotence=true`, reintentos acotados por
+  `delivery.timeout.ms`, `linger.ms=10`, `lz4`. `EnviadorKafka` valida el DTO, agrega las cabeceras `traceId` y
+  `eventType`, envía en segundo plano y registra partición/offset o el error.
+- **Tópico** (`KafkaConfig`, `NewTopic`): `audit.timeline` con 3 particiones, 3 réplicas, `min.insync.replicas=2`,
+  `compact,delete`, 30 días y `min.compaction.lag.ms` 1 h (mismos valores que reservations y que el script de infra).
+- **Kafka caído:** el servicio arranca, la API responde sin esperar, `/actuator/health` sigue UP (reservations y el BFF
+  dependen de él) y el error queda en el log. Garantía completa = patrón outbox (documentado, no implementado).
+
 ## Ejecutar
 
 ```bash
@@ -64,3 +87,8 @@ Si el puerto 8082 está ocupado en tu PC, agrega `--server.port=<otro>` (en Dock
 ./mvnw test
 ```
 Usan H2 en memoria en modo PostgreSQL; no necesitan RDS.
+
+Kafka (EP5): las pruebas de API corren con `@EmbeddedKafka` (3 brokers en memoria, sin Docker). `AuditoriaKafkaTest`
+lee `audit.timeline` con un consumidor real: evento al crear/editar/eliminar con actor, IP, traza, clave y cabeceras;
+nada si la operación se rechaza ni por las rutas internas de cupo; tópico con sus configuraciones. `KafkaCaidoTest`
+arranca sin brokers: la API responde rápido, el health sigue UP y el error queda en el log.

@@ -24,7 +24,33 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+  # Kafka (EP5): publica en audit.timeline las acciones sobre clases y salas.
+  #  - KAFKA_BOOTSTRAP_SERVERS: los 3 brokers de ec2-kafka (<ip-privada>:9092,<ip-privada>:9093,<ip-privada>:9094)
+  # Los serializers (String para la clave, JSON para el valor) se configuran en eventos/KafkaConfig.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    client-id: ms-gymflow-catalog
+    producer:
+      # El broker confirma cuando el mensaje está en todas las réplicas sincronizadas (al menos min.insync.replicas=2).
+      acks: all
+      # Reintentos "infinitos" acotados por tiempo: delivery.timeout.ms es el límite total por mensaje.
+      retries: 2147483647
+      compression-type: lz4
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 120000
+        request.timeout.ms: 30000
+        linger.ms: 10
+        # Si Kafka está caído, send() espera metadatos como máximo 10 s (en segundo plano, nunca en la petición HTTP).
+        max.block.ms: 10000
+    admin:
+      # Crea audit.timeline si falta. Si Kafka no responde, se registra y el servicio arranca igual.
+      fail-fast: false
+      operation-timeout: 10s
 
+# Kafka no entra en el health (Spring Boot no registra un indicador de Kafka): una caída de Kafka no deja unhealthy a
+# catalog, del que dependen reservations y el BFF.
 management:
   endpoints:
     web:

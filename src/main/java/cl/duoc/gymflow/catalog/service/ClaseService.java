@@ -7,28 +7,39 @@ import cl.duoc.gymflow.catalog.entity.Sala;
 import cl.duoc.gymflow.catalog.error.ConflictoException;
 import cl.duoc.gymflow.catalog.error.RecursoNoEncontradoException;
 import cl.duoc.gymflow.catalog.error.SolicitudInvalidaException;
+import cl.duoc.gymflow.catalog.eventos.Cambios;
+import cl.duoc.gymflow.catalog.eventos.CatalogoModificado;
+import cl.duoc.gymflow.catalog.eventos.EventoAuditoriaDto.Accion;
+import cl.duoc.gymflow.catalog.eventos.EventoAuditoriaDto.TipoEntidad;
 import cl.duoc.gymflow.catalog.repository.ClaseFiltros;
 import cl.duoc.gymflow.catalog.repository.ClaseRepository;
 import cl.duoc.gymflow.catalog.repository.CupoReservadoRepository;
 import cl.duoc.gymflow.catalog.repository.SalaRepository;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Clases del catálogo. EP5: crear, editar y eliminar publican {@link CatalogoModificado} dentro de la transacción;
+ * se audita en Kafka ({@code audit.timeline}) solo si la transacción se confirma.
+ */
 @Service
 public class ClaseService {
 
     private final ClaseRepository claseRepository;
     private final SalaRepository salaRepository;
     private final CupoReservadoRepository cupoRepository;
+    private final ApplicationEventPublisher eventos;
 
     public ClaseService(ClaseRepository claseRepository, SalaRepository salaRepository,
-                        CupoReservadoRepository cupoRepository) {
+                        CupoReservadoRepository cupoRepository, ApplicationEventPublisher eventos) {
         this.claseRepository = claseRepository;
         this.salaRepository = salaRepository;
         this.cupoRepository = cupoRepository;
+        this.eventos = eventos;
     }
 
     @Transactional(readOnly = true)
@@ -50,7 +61,11 @@ public class ClaseService {
         Sala sala = salaValida(datos);
         Clase clase = new Clase(datos.name().trim(), datos.description(), datos.instructor().trim(), sala,
                 datos.startsAt(), datos.durationMinutes(), datos.capacity(), datos.plan());
-        return ClaseResponse.desde(claseRepository.save(clase));
+        Clase guardada = claseRepository.save(clase);
+        eventos.publishEvent(CatalogoModificado.de(Accion.CREAR, TipoEntidad.CLASE, guardada.getId(),
+                "Clase '" + guardada.getNombre() + "' creada: sala '" + sala.getNombre() + "', inicio "
+                        + guardada.getInicio() + ", cupo " + guardada.getCapacidad() + ", plan " + guardada.getPlan()));
+        return ClaseResponse.desde(guardada);
     }
 
     /**
@@ -65,8 +80,18 @@ public class ClaseService {
             throw new ConflictoException("La clase ya tiene " + clase.getCuposOcupados()
                     + " reservas confirmadas; el cupo no puede bajar a " + datos.capacity());
         }
+        Cambios cambios = new Cambios()
+                .campo("nombre", clase.getNombre(), datos.name().trim())
+                .campo("instructor", clase.getInstructor(), datos.instructor().trim())
+                .campo("sala", clase.getSala().getNombre(), sala.getNombre())
+                .campo("inicio", clase.getInicio(), datos.startsAt())
+                .campo("duración", clase.getDuracionMinutos(), datos.durationMinutes())
+                .campo("cupo", clase.getCapacidad(), datos.capacity())
+                .campo("plan", clase.getPlan(), datos.plan());
         clase.actualizar(datos.name().trim(), datos.description(), datos.instructor().trim(), sala,
                 datos.startsAt(), datos.durationMinutes(), datos.capacity(), datos.plan());
+        eventos.publishEvent(CatalogoModificado.de(Accion.EDITAR, TipoEntidad.CLASE, id,
+                "Clase '" + clase.getNombre() + "' editada: " + cambios.texto()));
         return ClaseResponse.desde(clase);
     }
 
@@ -78,6 +103,8 @@ public class ClaseService {
                     + "' porque tiene reservas confirmadas");
         }
         claseRepository.delete(clase);
+        eventos.publishEvent(CatalogoModificado.de(Accion.ELIMINAR, TipoEntidad.CLASE, id,
+                "Clase '" + clase.getNombre() + "' eliminada (inicio " + clase.getInicio() + ")"));
     }
 
     private Sala salaValida(ClaseRequest datos) {

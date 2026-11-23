@@ -12,19 +12,31 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * Base de las pruebas de API: contexto completo con H2 en memoria (las propiedades se pasan aquí,
  * sin application.yml de pruebas, para no reemplazar el de main) y la BD vacía antes de cada prueba.
+ * <p>
+ * Kafka (EP5): 3 brokers en memoria ({@code @EmbeddedKafka}, sin Docker) con {@code auto.create.topics.enable=false},
+ * igual que el clúster real. Spring reutiliza este contexto (y estos brokers) en todas las clases que heredan de esta base.
  */
+@EmbeddedKafka(count = 3, brokerProperties = {"auto.create.topics.enable=false"})
 @SpringBootTest(properties = {
+        "spring.kafka.bootstrap-servers=${spring.embedded.kafka.brokers}",
+        // Los brokers embebidos corren en esta JVM: sin esto, sus logs tapan el resultado de las pruebas.
+        "logging.level.kafka=WARN", "logging.level.org.apache.kafka=WARN", "logging.level.org.apache.zookeeper=WARN",
+        "logging.level.state.change.logger=WARN",
         "spring.datasource.url=jdbc:h2:mem:catalogo-pruebas;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
@@ -50,6 +62,21 @@ public abstract class PruebaApiBase {
 
     @Autowired
     protected CupoReservadoRepository cupoRepository;
+
+    /** Executor donde se publican los eventos de Kafka (en segundo plano). */
+    @Autowired
+    @Qualifier("applicationTaskExecutor")
+    private ThreadPoolTaskExecutor tareas;
+
+    /** Espera a que terminen las publicaciones en segundo plano, para que no se crucen con la prueba siguiente. */
+    @AfterEach
+    void esperarPublicacionesPendientes() throws InterruptedException {
+        long limite = System.currentTimeMillis() + 5000;
+        while ((tareas.getActiveCount() > 0 || !tareas.getThreadPoolExecutor().getQueue().isEmpty())
+                && System.currentTimeMillis() < limite) {
+            Thread.sleep(10);
+        }
+    }
 
     @BeforeEach
     void limpiarBd() {
